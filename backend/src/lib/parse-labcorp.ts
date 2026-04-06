@@ -55,6 +55,12 @@ const TERMINAL_PATTERNS = [
   /^Cardiovascular Tests/,
 ];
 
+/** Converts a date string from MM/DD/YYYY to ISO YYYY-MM-DD format. */
+function mmddyyyyToISO(mmddyyyy: string): string {
+  const [mm, dd, yyyy] = mmddyyyy.split("/");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function parseHeader(text: string): {
   dateCollected: string;
   dateReported: string;
@@ -68,17 +74,12 @@ function parseHeader(text: string): {
   );
   const fastingMatch = text.match(/Fasting:\s*(Yes|No)/i);
 
-  const formatDate = (mmddyyyy: string): string => {
-    const [mm, dd, yyyy] = mmddyyyy.split("/");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
   return {
     dateCollected: dateCollectedMatch
-      ? formatDate(dateCollectedMatch[1])
+      ? mmddyyyyToISO(dateCollectedMatch[1])
       : "",
     dateReported: dateReportedMatch
-      ? formatDate(dateReportedMatch[1])
+      ? mmddyyyyToISO(dateReportedMatch[1])
       : "",
     fasting: fastingMatch
       ? fastingMatch[1].toLowerCase() === "yes"
@@ -108,9 +109,9 @@ function stripPageNoise(text: string): string {
     // Terminal section — stop
     if (TERMINAL_PATTERNS.some((p) => p.test(trimmed))) break;
 
-    // Page header: "O'Brien, BrianDOB: ...Patient Report"
+    // Page header: "<Patient Name>DOB: ...Patient Report"
     // After this line come: Patient ID, Specimen ID, Date Collected (3 lines to skip)
-    if (/^O'Brien.*Patient Report$/.test(trimmed)) {
+    if (/Patient Report$/.test(trimmed)) {
       skipCount = 3;
       continue;
     }
@@ -252,8 +253,7 @@ function splitCurrentFromPrevious(
 }
 
 function parseBiomarkerDataLine(
-  dataLine: string,
-  hasPreviousDate: boolean
+  dataLine: string
 ): Omit<ParsedBiomarker, "name"> | null {
   if (!dataLine || dataLine.trim() === "") return null;
 
@@ -329,7 +329,6 @@ function parseBiomarkerDataLine(
         ? beforeUnit.substring(0, flagMatch.index).trim()
         : beforeUnit.trim();
     // Do NOT split — this is a single number (no previous date means no concatenation)
-    void hasPreviousDate;
   }
 
   const value = parseFloat(numericStr);
@@ -409,25 +408,26 @@ function isNoiseLine(trimmed: string, line: string): boolean {
 function isValidNextPanelName(candidate: string): boolean {
   if (!candidate) return false;
   if (!/^[A-Z]/.test(candidate)) return false;
-  if (/^\d/.test(candidate)) return false;
   if (candidate.length < 3) return false;
   // Exclude the column header specifically (not panel names starting with "Test")
   if (candidate.startsWith("TestCurrent")) return false;
-  if (candidate.startsWith("Please")) return false;
-  if (candidate.startsWith("This ")) return false;
-  if (candidate.startsWith("*")) return false;
-  if (candidate.startsWith("According")) return false;
-  if (candidate.startsWith("Values")) return false;
-  if (candidate.startsWith("Roche")) return false;
-  if (candidate.startsWith("R and")) return false;
   if (candidate.includes("(Cont.)")) return false;
   if (TERMINAL_PATTERNS.some((p) => p.test(candidate))) return false;
+  // Delegate all other noise checks to isNoiseLine
+  if (isNoiseLine(candidate, candidate)) return false;
   // Reject lines that look like noise table rows (start with Low/High/Average/etc.)
   if (/^(Low|High|Average|Desirable|Borderline|Very|Moderate)/.test(candidate)) return false;
   // Reject lines that look like a data value row
   if (/^\d/.test(candidate)) return false;
   return true;
 }
+
+/**
+ * The column header row that LabCorp repeats at the top of every test table.
+ * Used to split the PDF text into per-panel sections.
+ */
+const COLUMN_HEADER =
+  "TestCurrent Result and FlagPrevious Result and DateUnitsReference Interval";
 
 export async function parseLabCorpPdf(
   buffer: Buffer
@@ -438,8 +438,6 @@ export async function parseLabCorpPdf(
   const header = parseHeader(rawText);
   const cleanText = stripPageNoise(rawText);
 
-  const COLUMN_HEADER =
-    "TestCurrent Result and FlagPrevious Result and DateUnitsReference Interval";
   const sections = cleanText.split(COLUMN_HEADER);
 
   const panels: ParsedPanel[] = [];
@@ -508,7 +506,7 @@ export async function parseLabCorpPdf(
       const inlineName = detectInlineNameData(trimmed);
       if (inlineName && !testName) {
         const dataStr = trimmed.substring(inlineName.length).trim();
-        const parsed = parseBiomarkerDataLine(dataStr, true);
+        const parsed = parseBiomarkerDataLine(dataStr);
         if (parsed) {
           biomarkers.push({ name: inlineName, ...parsed });
         }
@@ -518,8 +516,7 @@ export async function parseLabCorpPdf(
 
       // Data line (starts with digit) for the pending test name
       if (/^\d/.test(trimmed) && testName) {
-        const hasPrev = /\d{2}\/\d{2}\/\d{4}/.test(trimmed);
-        const parsed = parseBiomarkerDataLine(trimmed, hasPrev);
+        const parsed = parseBiomarkerDataLine(trimmed);
         if (parsed) {
           biomarkers.push({ name: testName, ...parsed });
         }
@@ -565,6 +562,10 @@ export async function parseLabCorpPdf(
         break;
       }
     }
+  }
+
+  if (panels.length === 0 && cleanText.trim().length > 200) {
+    throw new Error("Failed to parse PDF: no panels found");
   }
 
   return { ...header, panels };
