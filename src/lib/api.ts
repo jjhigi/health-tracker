@@ -45,3 +45,28 @@ export async function api<T>(
 
   return data as T;
 }
+
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  // Do NOT set Content-Type — browser sets it with multipart boundary
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data.error || `Upload failed with status ${res.status}`);
+  }
+
+  return data as T;
+}

@@ -40,3 +40,20 @@ export interface AuthResponse {
     email: string;
   };
 }
+
+export interface ParsedLabResult {
+  dateCollected: string;
+  dateReported: string;
+  fasting: boolean;
+  panels: Panel[];
+}
+
+export interface PanelTemplate {
+  name: string;
+  biomarkers: {
+    name: string;
+    unit: string;
+    referenceMin?: number;
+    referenceMax?: number;
+  }[];
+}
