@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, FileText, Plus } from "lucide-react";
 import { useLabData } from "../hooks/useLabData";
@@ -17,12 +17,17 @@ export function LabResults() {
     [labResults],
   );
 
-  const [selectedDate, setSelectedDate] = useState(
-    sortedResults[0]?.dateCollected ?? "",
-  );
-  const [expandedPanels, setExpandedPanels] = useState<Set<string>>(
-    new Set(sortedResults[0]?.panels.map((p) => p.name) ?? []),
-  );
+  const [selectedDate, setSelectedDate] = useState("");
+  const [expandedPanels, setExpandedPanels] = useState<Set<string>>(new Set());
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!selectedDate && sortedResults[0]) {
+      setSelectedDate(sortedResults[0].dateCollected);
+      setExpandedPanels(new Set(sortedResults[0].panels.map((p) => p.name)));
+    }
+  }, [sortedResults, selectedDate]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const selectedResult = sortedResults.find(
     (r) => r.dateCollected === selectedDate,
@@ -101,7 +106,6 @@ export function LabResults() {
                 key={panel.name}
                 className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-100"
               >
-                {/* Panel header */}
                 <button
                   onClick={() => togglePanel(panel.name)}
                   className="flex w-full items-center justify-between px-6 py-4 text-left transition-colors hover:bg-gray-50"
@@ -128,7 +132,6 @@ export function LabResults() {
                   </div>
                 </button>
 
-                {/* Panel table */}
                 {isExpanded && (
                   <div className="border-t border-gray-100">
                     <table className="w-full">
